@@ -1,0 +1,19 @@
+# Runtime dependencies of the SERVING image (infra/Dockerfile): the API and the MCP SQL server.
+# Deliberately excludes evaluation/data-prep packages (ragas, pandas, datasets, langchain-*, Faker):
+# they are only needed on your dev machine (requirements.txt) and would add ~1 GB to the image.
+# CPU-only PyTorch is installed by the Dockerfile BEFORE this file (the default Linux wheel is a
+# multi-GB CUDA build). infra/test_infra_offline.py fails if a runtime import is missing here.
+python-dotenv==1.0.1
+psycopg2-binary>=2.9.10
+qdrant-client==1.12.1
+sentence-transformers==3.3.1
+openai>=1.58.1,<2.0.0        # also serves OpenRouter
+huggingface_hub==0.26.5
+google-genai==0.3.0
+langgraph>=0.2.0
+sqlglot==30.21.0
+pydantic>=2.0
+fastapi>=0.110
+uvicorn>=0.29
+mcp>=1.10,<2                 # Phase 9: MCP SQL server + client (1.x API)
+langfuse>=4,<5               # Phase 11: tracing (no-op without keys)

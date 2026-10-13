@@ -1,0 +1,36 @@
+# ---- secrets: NEVER commit these -------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- python / tooling ------------------------------------------------------------------------
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# ---- editors / OS ----------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- big or regenerable data ------------------------------------------------------------------
+data_source_cuad/
+# everything under data/ is regenerable (CUAD extract, OFAC download, eval outputs) EXCEPT the
+# hand-checked gold question set, which is your ground truth and is committed on purpose.
+data/*
+!data/eval/
+data/eval/*
+!data/eval/gold_questions.jsonl
+
+# the regression baseline IS committed on purpose (see eval/check_regression.py)
+!eval/baseline/
+
+# ---- local logs / scratch ---------------------------------------------------------------------
+*.log
+tmp/

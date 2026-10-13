@@ -1,0 +1,130 @@
+# ProcureIQ stack.
+#
+#   Dev (infra only, run the API yourself with uvicorn)  -- unchanged from before:
+#       docker compose -f infra/docker-compose.yml up -d
+#
+#   Full stack (Postgres + Qdrant + MCP SQL server + API, all in containers):
+#       docker compose -f infra/docker-compose.yml --env-file .env --profile app up -d --build
+#
+# !! Keep this file at infra/docker-compose.yml and do NOT add a top-level `name:` key.
+#    Compose derives the project name from this folder ("infra"); your database and Qdrant data
+#    live in volumes prefixed with it. Changing either makes compose create NEW EMPTY volumes.
+#
+# Secrets: `--env-file .env` makes your repo-root .env visible to this file. Each service lists
+# EXACTLY the variables it needs (key-only entries are copied from .env if set, left unset if not),
+# so e.g. the SQL container never sees your LLM API keys.
+
+x-app-build: &app-build
+  context: ..
+  dockerfile: infra/Dockerfile
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: procureiq_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: procureiq
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"   # loopback only: reachable from your machine, not your network
+    volumes:
+      - procureiq_pgdata:/var/lib/postgresql/data
+      - ../erp/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d procureiq"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: procureiq_qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"   # REST API
+      - "127.0.0.1:6334:6334"   # gRPC
+    volumes:
+      - procureiq_qdrant_data:/qdrant/storage
+
+  # ---- Phase 12: application services (opt-in via --profile app) -------------------------------
+  mcp-sql:
+    profiles: ["app"]
+    build: *app-build
+    image: procureiq-app:latest
+    container_name: procureiq_mcp_sql
+    restart: unless-stopped
+    command: ["python", "mcp_servers/sql_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8765"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=procureiq
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_RO_USER
+      - POSTGRES_RO_PASSWORD
+    expose:
+      - "8765"   # reachable by other containers ONLY. No `ports:` on purpose: this server has no auth.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8765), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    profiles: ["app"]
+    build: *app-build
+    image: procureiq-app:latest
+    container_name: procureiq_api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # wiring between containers (fixed)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=procureiq
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_PATH=
+      - PROCUREIQ_SQL_BACKEND=mcp
+      - PROCUREIQ_MCP_SQL_URL=http://mcp-sql:8765/mcp
+      # from your .env, if set
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - PROCUREIQ_PROVIDER
+      - PROCUREIQ_FAKE_MODELS
+      - OPENROUTER_API_KEY
+      - OPENROUTER_MODEL
+      - GEMINI_API_KEY
+      - PROCUREIQ_API_KEY
+      - PROCUREIQ_CACHE_TTL_S
+      - PROCUREIQ_CACHE_MAX
+      - PROCUREIQ_MAX_CONCURRENT
+      - PROCUREIQ_QUEUE_TIMEOUT_S
+      - PROCUREIQ_MCP_TIMEOUT_S
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - LANGFUSE_HOST
+      - LANGFUSE_TRACING_ENABLED
+      - LANGFUSE_CAPTURE_CONTENT
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      mcp-sql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 90s   # loading the models takes a while
+
+volumes:
+  procureiq_pgdata:
+  procureiq_qdrant_data:

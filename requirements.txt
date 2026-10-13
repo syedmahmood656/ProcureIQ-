@@ -1,0 +1,44 @@
+Faker==30.8.2
+psycopg2-binary>=2.9.10
+python-dotenv==1.0.1
+python-dotenv
+
+# Phase 2
+qdrant-client==1.12.1
+sentence-transformers==3.3.1   # downloads model weights from Hugging Face Hub on first use
+# Phase 3 -- generation providers for the baseline RAG endpoint (retrieval/generator.py).
+# Install whichever you actually plan to use; all three are listed for completeness.
+openai>=1.58.1,<2.0.0          # also used for OpenRouter, which is OpenAI-API-compatible
+huggingface_hub==0.26.5
+google-genai==0.3.0
+
+
+# Phase 4 -- gold question set generation + evaluation
+pandas==2.2.3
+ragas==0.2.10
+datasets==3.2.0
+# RAGAS needs a LangChain-wrapped judge LLM + embeddings. Only openrouter/gemini are wired as
+# judges (see eval/run_baseline_eval.py); huggingface is still fine as the *generator* being
+# evaluated. langchain-huggingface is required either way (used for RAGAS's embedding metric).
+langchain-openai==0.2.14
+langchain-google-genai==2.0.7
+langchain-huggingface==0.1.2
+
+# Phase 5 -- the agentic pipeline (agent/graph.py). Was imported since Phase 5 but never listed.
+langgraph>=0.2.0
+
+# Phase 6 -- SQL tool: AST-based SQL validation (agent/sql_tool.py)
+sqlglot==30.21.0
+
+# Phase 7 -- strict structured output (agent/schemas.py)
+pydantic>=2.0
+
+# Phase 8 -- serving layer (api/)
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27          # needed by FastAPI's TestClient (api/test_api_offline.py)
+
+# Phase 9 -- MCP server + client (pinned <2: code uses the 1.x FastMCP API)
+mcp>=1.10,<2
+
+langfuse>=4,<5

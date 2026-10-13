@@ -1,0 +1,125 @@
+# ProcureIQ CI. Runs on every push to main and on every pull request.
+#
+#   tests          all offline test suites + secret scan            (~3 min, no keys needed)
+#   docker-config  Dockerfile lint + docker-compose validation      (~1 min)
+#   stack-smoke    builds the image, starts the REAL container stack with fake models,
+#                  checks /ready (incl. the MCP SQL server) and one /ask round trip  (~10-15 min first
+#                  run, much faster once the Docker layer cache is warm)
+#
+# What CI deliberately does NOT do: score answer quality (needs your data + an LLM key) -- that is
+# eval/check_regression.py, run on your machine before changing prompts/retrieval/models.
+#
+# Action versions: the Node 24 majors. GitHub removed the Node 20 runtime on 2026-09-16, so older
+# majors (checkout@v4, setup-python@v5, ...) no longer work.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Offline tests + secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install test dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Secret scan (nothing key-shaped may be tracked by git)
+        run: python scripts/check_no_secrets.py
+
+      - name: Run every offline test suite
+        run: |
+          set -uo pipefail
+          mapfile -t files < <(find . -name '*offline*.py' -not -path './venv/*' | sort)
+          if [ "${#files[@]}" -eq 0 ]; then echo "no test files found"; exit 1; fi
+          failed=0
+          for f in "${files[@]}"; do
+            echo "::group::$f"
+            python "$f" || { echo "::error file=$f::test suite failed"; failed=1; }
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  docker-config:
+    name: Dockerfile lint + compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint the Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: infra/Dockerfile
+
+      - name: Validate docker-compose.yml (full stack profile)
+        run: docker compose -f infra/docker-compose.yml --env-file .env.example --profile app config --quiet
+
+  stack-smoke:
+    name: Container stack smoke test (fake models)
+    needs: [tests, docker-config]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image (layer-cached)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile
+          tags: procureiq-app:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start the stack (Postgres, Qdrant, MCP SQL server, API)
+        run: |
+          printf 'PROCUREIQ_FAKE_MODELS=1\nPROCUREIQ_PROVIDER=fake\n' > .env
+          docker compose -f infra/docker-compose.yml --env-file .env --profile app up -d --wait --wait-timeout 300 --no-build
+
+      - name: "/ready must report postgres, qdrant AND mcp_sql ok"
+        run: |
+          curl -fsS http://127.0.0.1:8000/ready | tee ready.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("ready.json"))
+          assert d["status"] == "ready", d
+          assert d["checks"].get("mcp_sql") == "ok", d
+          PY
+
+      - name: "/ask round trip (fake LLM - proves the plumbing, not answer quality)"
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8000/ask \
+            -H 'Content-Type: application/json' \
+            -d '{"question": "Who are the top 5 vendors by total spend?", "refresh": true}' \
+            | python3 -c 'import json,sys; d = json.load(sys.stdin); assert d["report"]["route"] in ("sql", "rag", "both"), d; print("route:", d["report"]["route"])'
+
+      - name: Container logs (only on failure)
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --env-file .env --profile app logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file .env --profile app down -v

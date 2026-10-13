@@ -1,0 +1,29 @@
+(venv) PS C:\Projects\Procure-IQ> python eval/build_gold_questions.py    
+C:\Projects\Procure-IQ\eval\build_gold_questions.py:235: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated,and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`). Please use a specific unitinstead.
+  if not (as_of <= expiration <= as_of + pd.Timedelta(days=spec["expiring_within_days"])):
+Wrote 109 gold questions to C:\Projects\Procure-IQ\data\eval\gold_questions.jsonl
+  single-hop: 104 across 13 clause categories
+  multi-hop:  5
+    [mh_liability_spend] 4 matching vendor(s) -- Which vendors with total purchase-order spend above $1,537,622 have contracts that include an uncapped liability clause?
+    [mh_autorenew_termconv] 17 matching vendor(s) -- Which vendors have contracts that are set to auto-renew AND include a termination-for-convenience clause?
+    [mh_spend_exclusivity] 15 matching vendor(s) -- Which vendors with total purchase-order spend above $1,130,017 have contracts that include an exclusivity clause?
+    [mh_expiring_soon_uncapped] 10 matching vendor(s) -- Which vendors have contracts expiring within 180 days of 2026-09-22 that also include an uncapped liability clause?
+    [mh_spend_noncompete] 4 matching vendor(s) -- Which vendors with total purchase-order spend above $1,537,622 have contracts that include a non-compete restriction?
+(venv) PS C:\Projects\Procure-IQ> python eval/test_offline.py
+[PASS] hit when one expected chunk retrieved
+[PASS] miss when no expected chunk retrieved
+[PASS] miss on empty retrieval
+[PASS] full recall, exact case
+[PASS] full recall, case-insensitive
+[PASS] partial recall
+[PASS] zero recall
+[PASS] vacuous true on empty expected list
+[PASS] single_hop_count == 3
+[PASS] overall hit rate == 2/3
+[PASS] per-category breakdown correct
+[PASS] multi_hop_count == 2
+[PASS] multi-hop avg recall == 0.25
+[PASS] multi_hop_avg is None when no multi-hop items
+
+All offline scoring tests passed.
+

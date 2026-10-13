@@ -1,0 +1,23 @@
+# The build context is the repo root. Keep it small and keep secrets OUT of the image.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.vscode
+.idea
+venv
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+# big data and dev-only code: never needed at runtime
+data
+data_source_cuad
+eval
+erp
+risk
+scripts
+infra
+# tests are not shipped
+**/test_*.py

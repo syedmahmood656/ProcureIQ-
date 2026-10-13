@@ -1,0 +1,65 @@
+python mcp_servers/test_mcp_offline.py = 34 checks passed
+python .\risk\test_risk_offline.py = 34 checks passed
+(venv) PS C:\Projects\Procure-IQ> python risk/ofac_loader.py --download
+downloaded SDN.CSV (5,727,333 bytes) from https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV
+downloaded ALT.CSV (1,063,323 bytes) from https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ALT.CSV
+Loaded 19,416 primary records + 20,182 aliases.  By type: {'entity': 10018, 'individual': 7497, 'vessel': 1559, 'aircraft': 342}
+(venv) PS C:\Projects\Procure-IQ> python risk/ofac_loader.py
+Loaded 19,416 primary records + 20,182 aliases.  By type: {'entity': 10018, 'individual': 7497, 'vessel': 1559, 'aircraft': 342}
+(venv) PS C:\Projects\Procure-IQ> python risk/screen_vendors.py --dry-run
+Index: 21,360 searchable names (list loaded 2026-10-12 02:15)
+Screened 120 vendors: {'REVIEW': 0, 'WEAK_MATCH': 1, 'CLEAR': 119}
+  WEAK_MATCH 0.857  'Griffin Group'  ~  'GRIFFON FZC' [primary, RUSSIA-EO14024]
+
+--dry-run: nothing written.
+(venv) PS C:\Projects\Procure-IQ> python risk/screen_vendors.py
+Index: 21,360 searchable names (list loaded 2026-10-12 02:15)
+Screened 120 vendors: {'REVIEW': 0, 'WEAK_MATCH': 1, 'CLEAR': 119}
+  WEAK_MATCH 0.857  'Griffin Group'  ~  'GRIFFON FZC' [primary, RUSSIA-EO14024]
+
+Wrote vendor_risk_screening and updated vendors.risk_tier.
+(venv) PS C:\Projects\Procure-IQ>python risk/screen_vendors.py --name "Buchanan LLC"
+Index: 21,360 searchable names (list loaded 2026-10-12 02:15)
+
+No candidates for 'Buchanan LLC' (CLEAR).
+(venv) PS C:\Projects\Procure-IQ>  $env:PROCUREIQ_SQL_BACKEND = "mcp"
+(venv) PS C:\Projects\Procure-IQ> python agent/graph.py "Which vendors are flagged for sanctions screening review, and how much have we spent with them?" --provider openrouter
+C:\Projects\Procure-IQ\venv\Lib\site-packages\langgraph\cache\base\__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+QUESTION: Which vendors are flagged for sanctions screening review, and how much have we spent with them?
+ROUTE: sql
+
+TRACE:
+  - planner (retry 0): initial query -> 'Which vendors are flagged for sanctions screening review, and how much have we spent with them?'
+  - router: sql (structured-data signals (3), no contract-clause signals)
+  - sql_tool: 0 row(s)
+  -   sql> WITH vendor_spend AS (SELECT vendor_id, SUM(amount) AS total_spend FROM purchase_orders WHERE status <> 'CANCELLED' GROUP BY vendor_id) SELECT v.vendor_name, vs.total_spend FROM vendor_risk_screening AS rs JOIN vendor_spend AS vs ON rs.vendor_id = vs.vendor_id JOIN vendors AS v ON rs.vendor_id = v.vendor_id WHERE rs.status = 'REVIEW' ORDER BY vs.total_spend DESC LIMIT 50
+  - synthesizer: answer generated
+  - critic: verdict=accept
+  - report: validated RiskReport (confidence=high, 0 finding(s))
+
+FINAL VERDICT: accept (after 0 retries)
+
+SQL RESULT:
+(query returned 0 rows)
+
+REPORT: confidence=high, 0 finding(s), 0 warning(s)  (use --json for full report)
+
+ANSWER:
+ The database query returned 0 rows, meaning there is no data available to identify any vendors flagged for sanctions screening review or to report any associated spend.
+
+Answer: No vendors are flagged for sanctions screening review based on the available data, and no spend figures can be reported.
+(venv) PS C:\Projects\Procure-IQ> (venv) PS C:\Projects\Procure-IQ> docker exec -it procureiq_postgres psql -U postgres -d procureiq
+psql (16.15 (Debian 16.15-1.pgdg13+2))
+Type "help" for help.
+
+procureiq=# INSERT INTO vendors(vendor_name,category,country) VALUES ('AEROCARIBBEAN AIRLINES','Raw Materials','India') RETURNING vendor_id;
+ vendor_id 
+-----------
+       123
+(1 row)
+
+INSERT 0 1
+procureiq=# INSERT INTO purchase_orders(vendor_id,po_date,amount,currency,status) VALUES (121,'2026-05-01',1500000,'USD','CLOSED');
+INSERT 0 1
+procureiq=# 

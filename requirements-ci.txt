@@ -1,0 +1,14 @@
+# What the OFFLINE test suites need (CI job `tests`). Deliberately small: no torch / sentence-transformers
+# (tests use fake models) and no eval stack. Pins must match requirements-api.txt (infra test checks).
+python-dotenv==1.0.1
+psycopg2-binary>=2.9.10
+qdrant-client==1.12.1
+langgraph>=0.2.0
+sqlglot==30.21.0
+pydantic>=2.0
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27                  # FastAPI TestClient
+mcp>=1.10,<2
+langfuse>=4,<5               # also provides the opentelemetry SDK used by the tracing tests
+pyyaml>=6                    # infra/test_infra_offline.py
