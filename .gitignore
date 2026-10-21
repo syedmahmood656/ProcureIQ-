@@ -40,3 +40,5 @@ infra/cloudrun/deploy.env
 infra/cloudrun/service.rendered.yaml
 *.dump
 *.snapshot
+
+.github/workflows/keepalive.yml
