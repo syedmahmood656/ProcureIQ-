@@ -7,6 +7,7 @@
 param(
     [string]$BaseUrl = "http://localhost:8000",
     [string]$ApiKey = $env:PROCUREIQ_API_KEY,
+    [hashtable]$ExtraHeaders = @{},     # e.g. @{ "ngrok-skip-browser-warning" = "1" }
     [int]$ReadyTimeoutS = 240
 )
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,7 @@ function Pass($m) { Write-Host "[PASS] $m" -ForegroundColor Green }
 function Fail($m) { Write-Host "[FAIL] $m" -ForegroundColor Red; $script:failed = $true }
 
 $headers = @{}
+foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
 if ($ApiKey) { $headers["X-API-Key"] = $ApiKey }
 
 # 1) wait until /ready says everything is up (models load, Postgres, Qdrant, MCP SQL server)
@@ -23,7 +25,7 @@ $deadline = (Get-Date).AddSeconds($ReadyTimeoutS)
 $ready = $null
 while ((Get-Date) -lt $deadline) {
     try {
-        $ready = Invoke-RestMethod -Uri "$BaseUrl/ready" -Method Get
+        $ready = Invoke-RestMethod -Uri "$BaseUrl/ready" -Method Get -Headers $headers
         if ($ready.status -eq "ready") { break }
     } catch { }
     Start-Sleep -Seconds 3

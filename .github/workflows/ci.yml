@@ -71,8 +71,8 @@ jobs:
         with:
           dockerfile: infra/Dockerfile
 
-      - name: Validate docker-compose.yml (full stack profile)
-        run: docker compose -f infra/docker-compose.yml --env-file .env.example --profile app config --quiet
+      - name: Validate docker-compose.yml (full stack + tunnel profiles)
+        run: docker compose -f infra/docker-compose.yml --env-file .env.example --profile app --profile public --profile public-ngrok config --quiet
 
   stack-smoke:
     name: Container stack smoke test (fake models)

@@ -394,3 +394,4 @@ No rate limiting yet -- the concurrency cap protects the server, not an LLM quot
 python api/test_api_offline.py     # 52 checks; the real graph behind the real app, scripted LLM, no services
 ```
 
+

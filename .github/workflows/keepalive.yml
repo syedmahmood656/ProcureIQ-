@@ -1,0 +1,37 @@
+# Daily ping of the deployed API's /ready endpoint.
+#
+# WHY: the free Qdrant Cloud cluster is PAUSED after 7 days without activity and DELETED after
+# 4 weeks. /ready queries Qdrant and Postgres, which counts as activity and also wakes Neon, so one
+# daily call keeps the whole demo alive -- and tells you (red run + email) if the deployment broke.
+#
+# Setup: repo Settings > Secrets and variables > Actions > Variables > New repository variable
+#        SERVICE_URL = https://procureiq-xxxxx-xx.a.run.app   (no trailing slash)
+# Note: GitHub disables scheduled workflows after 60 days without repository activity.
+name: Keep-alive
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily, 03:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    # Only meaningful for the cloud deployment. Without the SERVICE_URL variable the job is skipped
+    # (not failed), so a local-only setup never gets daily failure emails.
+    if: ${{ vars.SERVICE_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call /ready (cold starts can take ~60-90 s, so retry)
+        env:
+          SERVICE_URL: ${{ vars.SERVICE_URL }}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o ready.json -w '%{http_code}' --max-time 120 "$SERVICE_URL/ready" || true)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then cat ready.json; echo; exit 0; fi
+            sleep 20
+          done
+          echo "::error::service not ready after 6 attempts"; cat ready.json 2>/dev/null || true; exit 1

@@ -55,7 +55,11 @@ def build_real_runner() -> GraphRunner:
     embedder = FakeEmbedder() if fake_models else SentenceTransformerEmbedder()
     reranker = FakeReranker() if fake_models else CrossEncoderReranker()
     qdrant_path = os.getenv("QDRANT_PATH")
-    client = QdrantClient(path=qdrant_path) if qdrant_path else QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"))
+    client = (
+        QdrantClient(path=qdrant_path)
+        if qdrant_path
+        else QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"), api_key=os.getenv("QDRANT_API_KEY") or None)
+    )
     generator = get_generator(provider)
     
     sql_executor = get_sql_executor()          # None = in-process (Phase 6); else MCP-backed

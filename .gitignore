@@ -34,3 +34,9 @@ data/eval/*
 # ---- local logs / scratch ---------------------------------------------------------------------
 *.log
 tmp/
+
+# ---- Phase 13b: deployment (local config + generated files; never commit) ---------------------------
+infra/cloudrun/deploy.env
+infra/cloudrun/service.rendered.yaml
+*.dump
+*.snapshot

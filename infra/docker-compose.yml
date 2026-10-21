@@ -125,6 +125,32 @@ services:
       retries: 6
       start_period: 90s   # loading the models takes a while
 
+  # ---- Phase 13c: free public access from your own PC (opt-in; infra/go_public.ps1 runs these) ------
+  # The tunnel makes only OUTBOUND connections: no port is opened on your PC or router. It reaches the
+  # API over the compose network. Needs BOTH profiles:  --profile app --profile public
+  tunnel:
+    profiles: ["public"]
+    image: cloudflare/cloudflared:2026.9.1   # Cloudflare "quick tunnel": free, no account, random URL
+    container_name: procureiq_tunnel
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--url", "http://api:8000"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional permanent address (free ngrok account + free static domain). Needs --profile app --profile public-ngrok
+  ngrok:
+    profiles: ["public-ngrok"]
+    image: ngrok/ngrok:latest                # unpinned on purpose: ngrok refuses outdated agents
+    container_name: procureiq_ngrok
+    restart: unless-stopped
+    command: ["http", "--url=${NGROK_DOMAIN:-}", "api:8000"]
+    environment:
+      - NGROK_AUTHTOKEN
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   procureiq_pgdata:
   procureiq_qdrant_data:

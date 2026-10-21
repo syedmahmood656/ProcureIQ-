@@ -1,0 +1,4 @@
+# What `gcloud builds submit` uploads. Same exclusions as .gitignore (venv, .env, data...) plus .git.
+# Without this your venv (GBs) would be uploaded on every build.
+#!include:.gitignore
+.git
