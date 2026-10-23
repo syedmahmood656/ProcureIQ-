@@ -75,6 +75,39 @@ ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 check("CI validates the tunnel profiles of the compose file too", "--profile public --profile public-ngrok config --quiet" in ci)
 check("an outside /ready check runs before the smoke test", body.index('"$url/ready"') < body.index("smoke_test.ps1"))
 
+# ---- Windows PowerShell 5.1 rule: $PSScriptRoot is EMPTY inside a param() block (PowerShell 7 fills it in,
+# so tests run on pwsh cannot see this bug). Resolve script-relative defaults in the body instead.
+def param_block(text):
+    m = re.search(r"(?im)^\s*param\s*\(", text)
+    if not m:
+        return ""
+    i, depth, quote = m.end(), 1, None
+    while i < len(text) and depth:
+        c = text[i]
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "\"'":
+            quote = c
+        elif c == "#":
+            i = text.find("\n", i) - 1 if text.find("\n", i) != -1 else len(text)
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        i += 1
+    return text[m.start():i]
+
+
+for ps1 in sorted(HERE.glob("*.ps1")):
+    txt = ps1.read_text(encoding="utf-8")
+    pb = param_block(txt)
+    check(f"{ps1.name}: param() block found and parsed", pb.lower().lstrip().startswith("param"))
+    check(f"{ps1.name}: no $PSScriptRoot / $MyInvocation / $PSCommandPath inside param() (empty on Windows PowerShell 5.1)", not re.search(r"\$PSScriptRoot|\$MyInvocation|\$PSCommandPath", pb))
+for name in ("go_public.ps1", "deploy_gcp.ps1", "migrate_data.ps1"):
+    txt = (HERE / name).read_text(encoding="utf-8")
+    check(f"{name}: resolves the script folder in the body, with a fallback", "$ScriptDir = $PSScriptRoot" in txt and "$MyInvocation.MyCommand.Path" in txt)
+check("param_block() really reads past parentheses/comments/strings in a param block", "ReadyTimeoutS" in param_block(script) and "VerifyTimeoutS" in param_block(script))
+
 ps = shutil.which("pwsh") or shutil.which("powershell")
 if ps:
     for f in ("go_public.ps1", "smoke_test.ps1"):
@@ -188,6 +221,14 @@ code, out, calls, _, _ = run("-NoVerify", extra_env={"FAKE_INFO_FAIL": "1"})
 check("Docker not running -> clear message, nothing started", code != 0 and "Docker is not running" in out and not ups(calls))
 code, out, calls, _, _ = run("-NoVerify", env_exists=False)
 check("no .env -> tells you how to create it, nothing started", code != 0 and "Copy-Item .env.example .env" in out and not ups(calls))
+
+if not (ROOT / ".env").exists():
+    shutil.rmtree(FAKE, ignore_errors=True); FAKE.mkdir()
+    env0 = dict(os.environ, PATH=f"{shim_dir}:{os.environ['PATH']}", FAKE_DIR=str(FAKE), DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")
+    r0 = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-File", str(HERE / "go_public.ps1"), "-NoVerify"], capture_output=True, text=True, env=env0, timeout=60)
+    check("no -EnvFile given: the default is <repo root>/.env (and a missing file is reported with that path)", r0.returncode != 0 and str(ROOT / ".env") in (r0.stdout + r0.stderr).replace("\\", "/").replace(str(ROOT).replace("\\", "/") + "/.env", str(ROOT / ".env")))
+else:
+    print("(default-path check skipped: a real .env exists in the repo root and must not be touched)")
 
 # ---- the API key rules
 code, out, calls, keys, envtxt = run("-NoVerify", tunnel_log=CF_LOG)

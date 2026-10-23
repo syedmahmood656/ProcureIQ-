@@ -21,3 +21,7 @@ scripts
 infra
 # tests are not shipped
 **/test_*.py
+
+
+# to start container
+# docker compose -f infra/docker-compose.yml --env-file .env --profile app up -d

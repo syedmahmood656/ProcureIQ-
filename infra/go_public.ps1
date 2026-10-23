@@ -33,13 +33,19 @@ param(
     [switch]$RotateKey,
     [switch]$NoVerify,
     [string]$PublicUrl,
-    [string]$EnvFile = (Join-Path (Split-Path $PSScriptRoot -Parent) ".env"),
-    [string]$ComposeFile = (Join-Path $PSScriptRoot "docker-compose.yml"),
+    [string]$EnvFile = "",          # default: .env in the repo root
+    [string]$ComposeFile = "",      # default: infra\docker-compose.yml
     [int]$ReadyTimeoutS = 240,
     [int]$VerifyTimeoutS = 90
 )
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 leaves $PSScriptRoot EMPTY inside the param() block, so defaults that need the
+# script folder are resolved here, in the body (with a fallback for unusual ways of starting the script).
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $EnvFile) { $EnvFile = Join-Path (Split-Path $ScriptDir -Parent) ".env" }
+if (-not $ComposeFile) { $ComposeFile = Join-Path $ScriptDir "docker-compose.yml" }
 
 # ---------------------------------------------------------------------------------------------
 # helpers
@@ -200,7 +206,7 @@ if (-not $NoVerify) {
     Write-Host "[PASS] public /ready is ready" -ForegroundColor Green
 
     # real questions through the tunnel, using the API key (same test as for the cloud deployment)
-    & (Join-Path $PSScriptRoot "smoke_test.ps1") -BaseUrl $url -ApiKey $apiKey -ExtraHeaders $extra
+    & (Join-Path $ScriptDir "smoke_test.ps1") -BaseUrl $url -ApiKey $apiKey -ExtraHeaders $extra
     if ($LASTEXITCODE -ne 0) { throw "The smoke test through the public URL failed (see above)." }
 }
 

@@ -40,7 +40,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RepoRoot = Split-Path $PSScriptRoot -Parent
+# Windows PowerShell 5.1 leaves $PSScriptRoot EMPTY inside the param() block, so defaults that need the
+# script folder are resolved here, in the body (with a fallback for unusual ways of starting the script).
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$RepoRoot = Split-Path $ScriptDir -Parent
 
 function Invoke-Native([string]$Exe, [string[]]$NArgs) {
     # see deploy_gcp.ps1: PowerShell 5.1 treats any native stderr text as an error under Stop

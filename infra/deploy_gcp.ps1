@@ -23,14 +23,19 @@
 param(
     [ValidateSet("setup", "build", "deploy", "all")]
     [string]$Action = "all",
-    [string]$ConfigFile = (Join-Path $PSScriptRoot "cloudrun\deploy.env"),
+    [string]$ConfigFile = "",       # default: infra\cloudrun\deploy.env
     [string]$Tag = (Get-Date -Format "yyyyMMdd-HHmmss"),
     [switch]$Private,      # do not allow unauthenticated invocation (then the smoke test cannot reach it)
     [switch]$SkipSmoke
 )
 
 $ErrorActionPreference = "Stop"
-$RepoRoot = Split-Path $PSScriptRoot -Parent
+# Windows PowerShell 5.1 leaves $PSScriptRoot EMPTY inside the param() block, so defaults that need the
+# script folder are resolved here, in the body (with a fallback for unusual ways of starting the script).
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$RepoRoot = Split-Path $ScriptDir -Parent
+if (-not $ConfigFile) { $ConfigFile = Join-Path $ScriptDir "cloudrun\deploy.env" }
 # captured here because $PSBoundParameters inside a function is that function's own (empty) set
 $TagWasGiven = $PSBoundParameters.ContainsKey("Tag")
 
@@ -201,9 +206,9 @@ function Invoke-Deploy {
         throw "-Action deploy needs -Tag <an existing build>. List builds with: gcloud artifacts docker images list $Region-docker.pkg.dev/$Project/$Repo"
     }
     Write-Host "`n== deploy: $Image =="
-    $rendered = Join-Path $PSScriptRoot "cloudrun\service.rendered.yaml"
+    $rendered = Join-Path $ScriptDir "cloudrun\service.rendered.yaml"
     $py = "python"
-    & $py (Join-Path $PSScriptRoot "render_service.py") --config $ConfigFile --out $rendered --image $Image --region $Region --runtime-sa $RuntimeSa
+    & $py (Join-Path $ScriptDir "render_service.py") --config $ConfigFile --out $rendered --image $Image --region $Region --runtime-sa $RuntimeSa
     if ($LASTEXITCODE -ne 0) { throw "render_service.py failed (see the config error above)" }
 
     Invoke-Gcloud @("run", "services", "replace", $rendered, "--region", $Region, "--project", $Project)
@@ -219,7 +224,7 @@ function Invoke-Deploy {
     Write-Host "`n== smoke test (first request cold-starts the instance: allow 1-3 minutes) =="
     $apiKey = Get-GcloudValue @("secrets", "versions", "access", "latest", "--secret", "procureiq-api-key", "--project", $Project)
     $hostExe = (Get-Process -Id $PID).Path
-    & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "smoke_test.ps1") -BaseUrl $url -ApiKey $apiKey
+    & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "smoke_test.ps1") -BaseUrl $url -ApiKey $apiKey
     if ($LASTEXITCODE -ne 0) { throw "smoke test failed: check 'gcloud run services logs read $Service --region $Region'" }
 }
 
