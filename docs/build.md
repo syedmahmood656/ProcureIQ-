@@ -58,8 +58,8 @@ Design principles that run through every phase:
 | 12 | Containerization: one image, compose profiles, smoke test | Done (verified on the author's machine) | 73 checks |
 | 13a | CI (GitHub Actions), secret scanner, regression gate | Done | 23 + 24 checks |
 | 13b | Optional cloud deployment (Cloud Run + Neon + Qdrant Cloud) | Built, not run against real accounts | 96 checks |
-| 13c | Free public access from your own PC (tunnel) | Built, not run against a real tunnel | 56 checks |
-| 14 to 16 | Remaining work (section 13) | Planned | |
+| 13c | Free public access from your own PC (tunnel) | Done: Cloudflare quick tunnel verified end to end on the author's machine; ngrok option untested | 83 checks |
+| 14 to 17 | Remaining work, including the demo UI in Phase 15 (section 13) | Planned | |
 
 Over 700 automated checks across 13 offline suites, all run in CI.
 
@@ -77,6 +77,7 @@ Over 700 automated checks across 13 offline suites, all run in CI.
 | 7 Containerization and deployment | 12, 13b, 13c |
 | 8 "Wow factor" add-ons | not started (section 13) |
 | 9 Polish for the hiring committee | not started (section 13) |
+| (not in the guide) Demo user interface | Phase 15, not started (section 13) |
 
 ---
 
@@ -371,9 +372,15 @@ Neon Free is 0.5 GB; any Cloud Run container under 1 vCPU forces concurrency 1 f
 `infra/go_public.ps1` starts the stack plus a tunnel container (Cloudflare quick tunnel by default;
 ngrok for a permanent address). It refuses to expose the API without an API key (generates and saves
 one), checks the public URL from outside, and runs the smoke test through it. The tunnel makes only
-outbound connections. Verified against a fake docker and a fake API under PowerShell 7, and the real
-`cloudflared` binary accepts the compose arguments. The quick-tunnel URL changes on every start and
-`/ask/stream` does not work through it.
+outbound connections. **Self-healing**: a quick-tunnel address dies for good when the PC sleeps, the
+network changes or Docker restarts, yet the old container and its old URL in the logs remain. If the
+detected URL does not answer `/ready`, the script says why (HTTP status or connection error), recreates
+the tunnel container once for a fresh address and re-checks; if that also fails it prints the tunnel's
+own last log lines and concrete next steps instead of looping. A URL given with `-PublicUrl`, and the
+ngrok provider, are never "healed". Verified against a fake docker and fake API servers (including one
+that answers 530 like a dead tunnel) under PowerShell 7, with the real `cloudflared` binary accepting the
+compose arguments, and run end to end by the author on Windows (public `/ready` and both smoke questions
+through the tunnel). The quick-tunnel URL changes on every start and `/ask/stream` does not work through it.
 
 ---
 
@@ -464,7 +471,7 @@ failure. CI discovers every `*offline*.py`.
 | `scripts/test_check_no_secrets_offline.py` | 23 | scanner |
 | `infra/test_infra_offline.py` | 73 | compose/Dockerfile/CI drift, `.gitignore` via real `git check-ignore` |
 | `infra/test_cloudrun_offline.py` | 96 | Cloud Run definition, deploy/migrate scripts |
-| `infra/test_public_offline.py` | 56 | tunnel services; runs the real script against a fake docker (Linux/macOS with pwsh) |
+| `infra/test_public_offline.py` | 83 | tunnel services; runs the real script against a fake docker (Linux/macOS with pwsh) |
 | `agent/test_sql_live.py` | | live DB proof (needs the stack; not in CI) |
 
 Practices worth knowing:
@@ -551,19 +558,23 @@ powershell -ExecutionPolicy Bypass -File .\infra\go_public.ps1                  
 5. **Cache is exact-match and per process**, not semantic and not shared between replicas.
 6. **One shared API key**: no per-user identity, roles or row-level security.
 7. **Streaming**: `/ask/stream` is not traced, and does not work through the free quick tunnel.
-8. **No token or cost accounting** (generators return text only).
-9. **No recorded quality numbers yet**: the baseline eval has not been run and blessed in the repo.
-10. **Synthetic ERP data**: spend, POs and invoices are generated, by design.
-11. **CI scope**: offline suites plus a fake-model container smoke test; no live-model evaluation.
-12. **Windows PowerShell 5.1**: scripts follow 5.1 syntax rules but were executed on PowerShell 7.
-13. **Cloud path** (13b) and **tunnel path** (13c) were not run against real accounts/tunnels.
-14. **Scale**: tested at about 42K chunks and 120 vendors; larger corpora are untested.
+8. **No user interface**: the API is driven from PowerShell/curl; the only page is FastAPI's auto-generated
+   `/docs` test page (framework default; no static files, HTML or CORS are configured). Planned in Phase 15.
+9. **No token or cost accounting** (generators return text only).
+10. **No recorded quality numbers yet**: the baseline eval has not been run and blessed in the repo.
+11. **Synthetic ERP data**: spend, POs and invoices are generated, by design.
+12. **CI scope**: offline suites plus a fake-model container smoke test; no live-model evaluation.
+13. **Windows PowerShell 5.1**: the tests run the scripts on PowerShell 7 and statically enforce 5.1 rules; a
+    5.1-only bug (`$PSScriptRoot` empty in `param()`) slipped through once and is now guarded by a test.
+14. **Cloud path** (13b) was not run against real accounts, and the **ngrok** option (13c) was never run against
+    real ngrok. The Cloudflare tunnel path was run by the author.
+15. **Scale**: tested at about 42K chunks and 120 vendors; larger corpora are untested.
 
 ---
 
 ## 13. Remaining phases (planned)
 
-Proposed numbering continues from 13. Effort is relative; "CV value" is the author's judgement.
+Proposed numbering continues from 13 (the UI is a new Phase 15; the extras and the polish moved to 16 and 17). Effort is relative; "CV value" is the author's judgement.
 
 **Phase 4 (finish): run and bless the evaluation.** *Small. Highest value.*
 Run the baseline and the agent against the 109-question gold set, record the numbers, bless them
@@ -578,7 +589,30 @@ spend per question. Benchmark the exact-match cache and test whether a semantic 
 similarity with a strict threshold) is worth its risk of returning a wrong answer for a near-duplicate
 question. Fix streaming traces if streaming matters.
 
-**Phase 15: one extra capability (pick one or two).** *Medium to large. Medium value each.*
+**Phase 15: demo user interface.** *Medium. High value (it is the first thing a visitor sees).*
+Today a visitor needs PowerShell and an API key. A small web page makes the project self-explanatory,
+gives the demo recording something to show, and lets non-technical people try it.
+- *Approach (recommended)*: one lightweight page **served by the existing API** (same address, nothing
+  extra to deploy, works in Docker and through the tunnel), plain HTML and JavaScript with no build
+  step. Alternatives: Streamlit or Gradio (fastest to build, but a separate service and less control),
+  or React (most polish, but needs a build step and probably another container). Pick by available time.
+- *Screens*: an **Ask** box with example questions for each route and an API-key field; an **Answer**
+  view with route, verdict and confidence badges, the summary, a findings table (vendor, contract id,
+  basis, figures), citations, the SQL that ran, warnings and guardrail flags; **live progress** from
+  `/ask/stream` when available (the free quick tunnel cannot stream, so it falls back to a spinner and
+  plain `/ask`); a collapsible **trace** of which steps ran and why; optionally a **vendor risk** view
+  (spend, risk tier, sanctions-screening match) and recent questions kept in the browser.
+- *Security requirements*: treat every field of a report as **untrusted** (contract text can carry
+  hostile content): render with text-only APIs, never `innerHTML`; keep the API key in memory or
+  session storage only, never in the URL; same origin so no CORS is needed; send a strict
+  Content-Security-Policy header; the page itself is public but all data still needs the key.
+- *Tests*: offline route and header tests (page served, CSP present, no inline script), an XSS test
+  that feeds a hostile report fixture through the renderer, and optionally a headless-browser smoke
+  test in CI. Deliverables: the UI files, the route that serves them, tests, and screenshots or a GIF
+  for the README.
+- *Interaction with later work*: if Phase 16 adds logins, the key field becomes a login screen.
+
+**Phase 16: one extra capability (pick one or two).** *Medium to large. Medium value each.*
 - *External risk signals*: SEC EDGAR filings and adverse news as a second risk-monitor tool behind
   its own MCP server, a fourth route, recorded fixtures for tests, rate limiting and a descriptive
   User-Agent, and the existing guardrails applied to web text.
@@ -590,16 +624,16 @@ question. Fix streaming traces if streaming matters.
 - *Retrieval grading*: a CRAG-style grader that judges retrieved chunks before synthesis. A weaker
   form already exists (the planner rewrites the query after the critic complains).
 
-**Phase 16: polish for the hiring committee.** *Medium. High value.*
+**Phase 17: polish for the hiring committee.** *Medium. High value.*
 An architecture diagram (the Mermaid ones in this document are a start); a README rewrite with the
-measured metrics from phases 4 and 14; a two to three minute demo recording; the load-test report;
+measured metrics from phases 4 and 14 and screenshots of the Phase 15 UI; a two to three minute demo recording of the UI; the load-test report;
 the `docs/PRD.md` and `docs/ARCHITECTURE.md` the README refers to (they are missing from the current
 repository); a threat-model note; repository hygiene (licence, badges, pinned dependencies with a
 lockfile and automated updates). A live integration test in CI with a tiny fixture corpus and real
 models would close the biggest CI gap.
 
-**Suggested order:** finish Phase 4, then 14, then one item from 15, then 16. Skip 15 entirely if
-time is short; phases 4, 14 and 16 are what turn a working system into a convincing one.
+**Suggested order:** finish Phase 4, then 14, then 15 (UI), then one item from 16, then 17. Skip 16
+entirely if time is short; phases 4, 14, 15 and 17 are what turn a working system into a convincing one.
 
 ---
 
@@ -627,5 +661,12 @@ Bugs and surprises that tests or checks caught (useful interview material):
 - a `Read-Host` hang when input is not a terminal; now non-interactive-safe (13b);
 - a URL filter test passed for the wrong reason until a log with a trailing error was added (13c);
 - Node 20 runners were removed, so older GitHub Action majors would have failed (13a);
+- `$PSScriptRoot` is empty inside a `param()` block on Windows PowerShell 5.1 (PowerShell 7 fills it in), so
+  `go_public.ps1` crashed on first run on the real machine; fixed, and every script's `param()` block is now
+  checked by a test (13c);
+- a stale quick-tunnel address from an earlier run was picked out of the old container's logs and never
+  answered; the script now diagnoses it and restarts the tunnel (13c);
+- a test only passed because the bad URL happened to come first in the log; a log with a trailing
+  Cloudflare error was added so the filter is really exercised (13c);
 - Hugging Face Docker Spaces and Qdrant's free tier changed their terms, found by checking the docs
   instead of trusting memory (13b, 13c).

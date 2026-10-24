@@ -70,10 +70,16 @@ check("never runs `down` or removes volumes (your data is safe)", "down" not in 
 check("the other provider's tunnel is stopped before starting (never two public paths)", body.index("$otherService") < body.index('@("up", "-d")'))
 check("url detection ignores Cloudflare's own api.trycloudflare.com and takes the newest match", '-ne "api"' in body and "[-1]" in body)
 check("-Stop only stops/removes the tunnel services", re.search(r'@\("stop", "tunnel", "ngrok"\)', body) and re.search(r'@\("rm", "-f", "tunnel", "ngrok"\)', body))
+check("verification keeps the real error text (no silent catch around the check)", "Last result:" in body and "Detail" in body and "Test-PublicReady" in body)
+check("a restart is attempted only for an auto-detected cloudflare URL", "-not $res.Ok -and $Provider -eq \"cloudflare\" -and -not $PublicUrl" in body)
+check("the tunnel restart never touches other services (--no-deps)", '"up", "-d", "--no-deps", "tunnel"' in body)
+check("the API must be healthy before a tunnel restart is attempted", body.index('"{{.State.Health.Status}}", "procureiq_api"') < body.index('"rm", "-f", "-s", "tunnel"'))
+check("busy-port errors get a plain-language hint", "Get-PortHint" in body and "findstr :8000" in script)
+check("the URL pattern is a parameter (survives a Cloudflare domain change)", "[string]$TunnelUrlPattern" in script)
 check("smoke test accepts extra headers (ngrok interstitial bypass)", "[hashtable]$ExtraHeaders" in smoke and "-Headers $headers" in smoke)
 ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 check("CI validates the tunnel profiles of the compose file too", "--profile public --profile public-ngrok config --quiet" in ci)
-check("an outside /ready check runs before the smoke test", body.index('"$url/ready"') < body.index("smoke_test.ps1"))
+check("an outside /ready check runs before the smoke test", body.index("Wait-PublicReady $url $extra") < body.index('(Join-Path $ScriptDir "smoke_test.ps1")'))
 
 # ---- Windows PowerShell 5.1 rule: $PSScriptRoot is EMPTY inside a param() block (PowerShell 7 fills it in,
 # so tests run on pwsh cannot see this bug). Resolve script-relative defaults in the body instead.
@@ -127,9 +133,15 @@ echo "$*" >> "$FAKE_DIR/calls.log"
 case "$1" in
   info)    [ -n "${FAKE_INFO_FAIL:-}" ] && exit 1; exit 0 ;;
   compose) if [[ " $* " == *" up "* ]]; then
-             (grep -h '^PROCUREIQ_API_KEY=' "$FAKE_ENV" || echo "NOKEY") | tail -1 >> "$FAKE_DIR/key_at_up.log"; fi
+             (grep -h '^PROCUREIQ_API_KEY=' "$FAKE_ENV" || echo "NOKEY") | tail -1 >> "$FAKE_DIR/key_at_up.log"
+             if [ -n "${FAKE_UP_FAIL:-}" ] || { [ -n "${FAKE_UP_FAIL_NODEPS:-}" ] && [[ " $* " == *" --no-deps "* ]]; }; then
+               echo "Error response from daemon: failed to set up container networking: Bind for 0.0.0.0:8000 failed: port is already allocated"; exit 1; fi
+           fi
+           if [[ " $* " == *" rm "* && " $* " == *" tunnel"* && -f "$FAKE_DIR/tunnel_after.log" ]]; then cp "$FAKE_DIR/tunnel_after.log" "$FAKE_DIR/tunnel.log"; fi
            exit 0 ;;
-  inspect) echo "${FAKE_HEALTH:-healthy}"; exit 0 ;;
+  inspect) n=$(( $(cat "$FAKE_DIR/inspect_n" 2>/dev/null || echo 0) + 1 )); echo $n > "$FAKE_DIR/inspect_n"
+           if [ -n "${FAKE_UNHEALTHY_AFTER:-}" ] && [ $n -gt "$FAKE_UNHEALTHY_AFTER" ]; then echo "unhealthy"; else echo "${FAKE_HEALTH:-healthy}"; fi
+           exit 0 ;;
   logs)    cat "$FAKE_DIR/tunnel.log" 2>/dev/null; exit 0 ;;
 esac
 exit 0
@@ -168,6 +180,29 @@ class FakeApi(BaseHTTPRequestHandler):
         self._send(200, {"report": {"route": route, "verdict": "accept", "confidence": "high"}})
 
 
+class DeadTunnel(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        self.send_response(530)   # what Cloudflare answers for a quick tunnel that is not running
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+class BadGateway(DeadTunnel):
+    def do_GET(self):
+        self.send_response(502)   # Cloudflare: the tunnel is up but cannot reach the origin
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+bad = HTTPServer(("127.0.0.1", 0), BadGateway)
+threading.Thread(target=bad.serve_forever, daemon=True).start()
+BAD502 = f"http://127.0.0.1:{bad.server_port}"
+dead = HTTPServer(("127.0.0.1", 0), DeadTunnel)
+threading.Thread(target=dead.serve_forever, daemon=True).start()
+DEAD = f"http://127.0.0.1:{dead.server_port}"
 server = HTTPServer(("127.0.0.1", 0), FakeApi)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 BASE = f"http://127.0.0.1:{server.server_port}"
@@ -180,10 +215,12 @@ shim_dir.mkdir()
 FAKE = work / "fake"
 
 
-def run(*args, env_text="OPENROUTER_API_KEY=x\nPOSTGRES_USER=postgres\n", env_exists=True, extra_env=None, tunnel_log="", timeout=120):
+def run(*args, env_text="OPENROUTER_API_KEY=x\nPOSTGRES_USER=postgres\n", env_exists=True, extra_env=None, tunnel_log="", tunnel_log_after=None, timeout=120):
     shutil.rmtree(FAKE, ignore_errors=True)
     FAKE.mkdir()
     (FAKE / "tunnel.log").write_text(tunnel_log)
+    if tunnel_log_after is not None:
+        (FAKE / "tunnel_after.log").write_text(tunnel_log_after)
     envfile = work / ".env"
     if env_exists:
         envfile.write_bytes(env_text.encode())
@@ -287,6 +324,50 @@ FakeApi.ready = False
 code, out, calls, _, _ = run("-PublicUrl", BASE, "-VerifyTimeoutS", "4", env_text=f"PROCUREIQ_API_KEY={GOOD_KEY}\n", tunnel_log=CF_LOG)
 check("public URL not ready -> fails instead of announcing a dead link", code != 0 and "did not answer /ready" in out and "PUBLIC ====" not in out)
 FakeApi.ready = True
+
+# ---- a stale quick tunnel heals itself (the failure seen on a real machine) and failures explain themselves
+PAT = ["-TunnelUrlPattern", r"http://(127)\.0\.0\.1:\d+"]
+GOODENV = f"PROCUREIQ_API_KEY={GOOD_KEY}\n"
+FakeApi.ready, FakeApi.key = True, GOOD_KEY
+restarts = lambda calls: [c for c in calls if " rm -f -s tunnel" in c]  # noqa: E731
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {DEAD}\n", tunnel_log_after=f"INF tunnel at {BASE}\n")
+check("stale tunnel address (HTTP 530): the script notices, says why, restarts the tunnel and succeeds", code == 0 and "HTTP 530" in out and "Restarting the tunnel for a fresh address" in out and "SMOKE TEST PASSED" in out)
+check("...it uses the NEW address, not the stale one", f"URL:      {BASE}" in out and DEAD not in out.split("PUBLIC")[-1])
+check("...with exactly one restart (rm -f -s tunnel, then up -d --no-deps tunnel: the API container is never touched)", len(restarts(calls)) == 1 and any(c.endswith("up -d --no-deps tunnel") for c in calls))
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {BASE}\n", tunnel_log_after=f"INF tunnel at {DEAD}\n")
+check("a healthy tunnel is left alone (no restart, same address)", code == 0 and not restarts(calls) and f"URL:      {BASE}" in out)
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {DEAD}\n", tunnel_log_after=f"INF tunnel at {DEAD}\n")
+check("dead before AND after the restart: fails after ONE restart, never loops", code != 0 and len(restarts(calls)) == 1 and "PUBLIC ====" not in out)
+check("the failure shows the real reason (Last result: HTTP 530)", "Last result: HTTP 530" in out)
+check("the failure shows the tunnel's own log lines and what to try", "Tunnel log (last lines)" in out and "VPN" in out and "7844" in out and "-Provider ngrok" in out)
+check("the tail of the tunnel log was fetched from the tunnel container", any("logs --tail 8 procureiq_tunnel" in c for c in calls))
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log="INF tunnel at http://127.0.0.1:1\n", tunnel_log_after="INF tunnel at http://127.0.0.1:1\n")
+check("a connection error is reported with its own message, not hidden", code != 0 and re.search(r"Last result: \S", out) is not None and "HTTP 530" not in out)
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {BAD502}\n", tunnel_log_after=f"INF tunnel at {BASE}\n")
+check("HTTP 502 is explained in plain words, then healed with a fresh tunnel", code == 0 and "HTTP 502 means the tunnel itself is up but cannot reach your API container" in out and "SMOKE TEST PASSED" in out and len(restarts(calls)) == 1)
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {BAD502}\n", tunnel_log_after=f"INF tunnel at {BAD502}\n")
+check("a persistent 502 fails with the meaning of 502, and facts about BOTH containers (state, health, networks)", code != 0 and "HTTP 502 = Cloudflare reached your tunnel" in out and "API container:" in out and "Tunnel container:" in out)
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {DEAD}\n", tunnel_log_after=f"INF tunnel at {BASE}\n", extra_env={"FAKE_UNHEALTHY_AFTER": "1"})
+check("API turned unhealthy: NO tunnel restart, a clear message with the commands to look at the API instead", code != 0 and not restarts(calls) and "API container is not healthy" in out and "logs api" in out)
+
+code, out, calls, _, _ = run(*PAT, "-NoVerify", env_text=GOODENV, tunnel_log=CF_LOG, extra_env={"FAKE_UP_FAIL": "1"})
+check("port already allocated on first start: nothing is announced, and the hint says how to find the culprit", code != 0 and "port is already allocated" in out and "netstat -ano | findstr :8000" in out and "PUBLIC ====" not in out)
+
+code, out, calls, _, _ = run(*PAT, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=f"INF tunnel at {DEAD}\n", tunnel_log_after=f"INF tunnel at {BASE}\n", extra_env={"FAKE_UP_FAIL_NODEPS": "1"})
+check("the same hint appears if the tunnel restart itself fails", code != 0 and "Could not restart the tunnel" in out and "netstat -ano | findstr :8000" in out)
+
+code, out, calls, _, _ = run("-PublicUrl", DEAD, "-VerifyTimeoutS", "4", env_text=GOODENV, tunnel_log=CF_LOG)
+check("a URL you pass with -PublicUrl is never 'healed' by restarting anything", code != 0 and not restarts(calls) and "Last result: HTTP 530" in out)
+
+code, out, calls, _, _ = run("-Provider", "ngrok", "-VerifyTimeoutS", "4", env_text=GOODENV + "NGROK_AUTHTOKEN=tok\nNGROK_DOMAIN=no-such-name.invalid\n")
+check("ngrok never restarts the cloudflare tunnel, and reads ITS container's log", code != 0 and not restarts(calls) and any("logs --tail 8 procureiq_ngrok" in c for c in calls))
 
 # ---- ngrok
 KEYED = f"PROCUREIQ_API_KEY={'cd' * 24}\n"

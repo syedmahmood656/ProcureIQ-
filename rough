@@ -63,3 +63,94 @@ INSERT 0 1
 procureiq=# INSERT INTO purchase_orders(vendor_id,po_date,amount,currency,status) VALUES (121,'2026-05-01',1500000,'USD','CLOSED');
 INSERT 0 1
 procureiq=# 
+
+
+####
+
+
+(venv) PS C:\Projects\Procure-IQ> powershell -ExecutionPolicy Bypass -File .\infra\go_public.ps1
+
+== starting the stack + cloudflare tunnel ==
+waiting for the API to become healthy (first start loads the models)
+waiting for Cloudflare to assign a public URL..
+checking https://shop-posing-yards-longitude.trycloudflare.com/ready from the outside (a brand-new tunnel needs a few seconds to resolve)...
+The tunnel address is not answering (HTTP 502).
+HTTP 502 means the tunnel itself is up but cannot reach your API container.
+Quick-tunnel addresses do not survive a sleep, a network change or a Docker restart. Restarting the tunnel for a fresh address...
+waiting for the new public URL...
+checking https://vital-knife-assumption-plans.trycloudflare.com/ready from the outside...
+The public URL did not answer /ready with status 'ready' within 90 s: https://vital-knife-assumption-plans.trycloudflare.com
+Last result: HTTP 502
+HTTP 502 = Cloudflare reached your tunnel, but the tunnel could not reach http://api:8000. Both containers must be on the same network 
+(listed below) and the API must be healthy.
+API container:    running health=healthy networks=
+Tunnel container: running health=none networks=infra_default
+Tunnel log (last lines):
+2026-10-24T09:33:04Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:8000
+2026-10-24T09:33:04Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding 
+to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 
+dest=https://vital-knife-assumption-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+2026-10-24T09:33:15Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:8000
+2026-10-24T09:33:15Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding 
+to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 
+dest=https://vital-knife-assumption-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+2026-10-24T09:33:26Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:8000
+2026-10-24T09:33:26Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding 
+to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 
+dest=https://vital-knife-assumption-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+2026-10-24T09:33:37Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:8000
+2026-10-24T09:33:37Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding 
+to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 
+dest=https://vital-knife-assumption-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+Things to try:
+  - wait a minute and run the script again (a new tunnel can take a moment to resolve)
+  - 'name could not be resolved': a VPN or your DNS may block *.trycloudflare.com; turn the VPN off or try a phone hotspot
+  - errors connecting to Cloudflare in the log: your network may block outbound port 7844; try another network
+  - or use a permanent address instead: .\infra\go_public.ps1 -Provider ngrok
+At C:\Projects\Procure-IQ\infra\go_public.ps1:274 char:9
++         throw ("The public URL did not answer /ready with status 'rea ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (The public URL ...-Provider ngrok:String) [], RuntimeException
+    + FullyQualifiedErrorId : The public URL did not answer /ready with status 'ready' within 90 s: https://vital-knife-assumption-plan 
+   s.trycloudflare.com
+Last result: HTTP 502
+    HTTP 502 = Cloudflare reached your tunnel, but the tunnel could not reach http://api:8000. Both containers must be on the same netw 
+   ork (listed below) and the API must be healthy.
+API container:    running health=healthy networks=
+Tunnel container: running health=none networks=infra_default
+Tunnel log (last lines):
+    2026-10-24T09:33:04Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+    from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:  
+  8000
+    2026-10-24T09:33:04Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be respond 
+   ing to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 dest=https://vital-knife-assumpti  
+  on-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+    2026-10-24T09:33:15Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+    from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:  
+  8000
+    2026-10-24T09:33:15Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be respond 
+   ing to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 dest=https://vital-knife-assumpti  
+  on-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+    2026-10-24T09:33:26Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+    from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:  
+  8000
+    2026-10-24T09:33:26Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be respond 
+   ing to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 dest=https://vital-knife-assumpti  
+  on-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+    2026-10-24T09:33:37Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic 
+    from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 event=1 ingressRule=0 originService=http://api:  
+  8000
+    2026-10-24T09:33:37Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be respond 
+   ing to traffic from cloudflared: dial tcp: lookup api on 127.0.0.11:53: no such host" connIndex=0 dest=https://vital-knife-assumpti  
+  on-plans.trycloudflare.com/ready event=0 ip=198.41.200.33 type=http
+Things to try:
+  - wait a minute and run the script again (a new tunnel can take a moment to resolve)
+  - 'name could not be resolved': a VPN or your DNS may block *.trycloudflare.com; turn the VPN off or try a phone hotspot
+  - errors connecting to Cloudflare in the log: your network may block outbound port 7844; try another network
+  - or use a permanent address instead: .\infra\go_public.ps1 -Provider ngrok
+ 
+(venv) PS C:\Projects\Procure-IQ> 
