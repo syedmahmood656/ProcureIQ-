@@ -5,12 +5,26 @@
   Exit code 0 = everything works, 1 = something failed (the message says what).
 #>
 param(
-    [string]$BaseUrl = "http://localhost:8000",
+    [string]$BaseUrl = "",              # default: http://localhost:<PROCUREIQ_HOST_PORT or 8000>
     [string]$ApiKey = $env:PROCUREIQ_API_KEY,
     [hashtable]$ExtraHeaders = @{},     # e.g. @{ "ngrok-skip-browser-warning" = "1" }
     [int]$ReadyTimeoutS = 240
 )
 $ErrorActionPreference = "Stop"
+if (-not $BaseUrl) {
+    # (resolved here, not in param(): $PSScriptRoot is empty inside param() on Windows PowerShell 5.1)
+    $dir = $PSScriptRoot
+    if (-not $dir) { $dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $port = $env:PROCUREIQ_HOST_PORT
+    $envFile = Join-Path (Split-Path $dir -Parent) ".env"
+    if (-not $port -and (Test-Path $envFile)) {
+        foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
+            if ($line.Trim().StartsWith("PROCUREIQ_HOST_PORT=")) { $port = $line.Trim().Substring(20).Split("#")[0].Trim().Trim('"').Trim("'") }
+        }
+    }
+    if (-not $port) { $port = "8000" }
+    $BaseUrl = "http://localhost:$port"
+}
 $failed = $false
 function Pass($m) { Write-Host "[PASS] $m" -ForegroundColor Green }
 function Fail($m) { Write-Host "[FAIL] $m" -ForegroundColor Red; $script:failed = $true }

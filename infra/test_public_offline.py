@@ -75,6 +75,10 @@ check("a restart is attempted only for an auto-detected cloudflare URL", "-not $
 check("the tunnel restart never touches other services (--no-deps)", '"up", "-d", "--no-deps", "tunnel"' in body)
 check("the API must be healthy before a tunnel restart is attempted", body.index('"{{.State.Health.Status}}", "procureiq_api"') < body.index('"rm", "-f", "-s", "tunnel"'))
 check("busy-port errors get a plain-language hint", "Get-PortHint" in body and "findstr :8000" in script)
+check("the host-port pre-flight runs before the stack is started", body.index("Get-PortHolders $hostPort") < body.index('@("up", "-d")'))
+check("port holders are read from real host-port mappings, not the container-side publish filter", '"{{.Names}}|{{.Ports}}"' in body and not re.search(r"Invoke-Docker[^\n]*publish=", body))
+check("the API's host port is configurable in compose (default 8000) and documented", svc["api"]["ports"] == ["127.0.0.1:${PROCUREIQ_HOST_PORT:-8000}:8000"] and "PROCUREIQ_HOST_PORT" in documented)
+check("the smoke test's default address follows PROCUREIQ_HOST_PORT", '[string]$BaseUrl = ""' in smoke and "PROCUREIQ_HOST_PORT" in smoke)
 check("the URL pattern is a parameter (survives a Cloudflare domain change)", "[string]$TunnelUrlPattern" in script)
 check("smoke test accepts extra headers (ngrok interstitial bypass)", "[hashtable]$ExtraHeaders" in smoke and "-Headers $headers" in smoke)
 ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -143,6 +147,7 @@ case "$1" in
            if [ -n "${FAKE_UNHEALTHY_AFTER:-}" ] && [ $n -gt "$FAKE_UNHEALTHY_AFTER" ]; then echo "unhealthy"; else echo "${FAKE_HEALTH:-healthy}"; fi
            exit 0 ;;
   logs)    cat "$FAKE_DIR/tunnel.log" 2>/dev/null; exit 0 ;;
+  ps)      printf '%s\n' "${FAKE_PS:-}"; exit 0 ;;
 esac
 exit 0
 """
@@ -207,6 +212,18 @@ server = HTTPServer(("127.0.0.1", 0), FakeApi)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 BASE = f"http://127.0.0.1:{server.server_port}"
 
+import socket
+
+
+def _free_port():
+    sk = socket.socket()
+    sk.bind(("127.0.0.1", 0))
+    port = sk.getsockname()[1]
+    sk.close()
+    return port
+
+
+FREE_PORT = _free_port()
 work = Path(tempfile.mkdtemp())
 shim_dir = work / "bin"
 shim_dir.mkdir()
@@ -228,6 +245,9 @@ def run(*args, env_text="OPENROUTER_API_KEY=x\nPOSTGRES_USER=postgres\n", env_ex
         envfile.unlink()
     env = dict(os.environ, PATH=f"{shim_dir}:{os.environ['PATH']}", FAKE_DIR=str(FAKE), FAKE_ENV=str(envfile), DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")
     env.pop("PROCUREIQ_API_KEY", None)
+    env.pop("PROCUREIQ_HOST_PORT", None)
+    if "PROCUREIQ_HOST_PORT" not in env_text:
+        env["PROCUREIQ_HOST_PORT"] = str(FREE_PORT)
     env.update(extra_env or {})
     r = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-File", str(HERE / "go_public.ps1"), "-EnvFile", str(envfile),
                         "-ComposeFile", str(HERE / "docker-compose.yml"), *args], capture_output=True, text=True, env=env, timeout=timeout)
@@ -368,6 +388,22 @@ check("a URL you pass with -PublicUrl is never 'healed' by restarting anything",
 
 code, out, calls, _, _ = run("-Provider", "ngrok", "-VerifyTimeoutS", "4", env_text=GOODENV + "NGROK_AUTHTOKEN=tok\nNGROK_DOMAIN=no-such-name.invalid\n")
 check("ngrok never restarts the cloudflare tunnel, and reads ITS container's log", code != 0 and not restarts(calls) and any("logs --tail 8 procureiq_ngrok" in c for c in calls))
+
+# ---- pre-flight: the host port must be free (a busy port made the API container fail and the tunnel answer 502)
+LEDGER = "ledger-finance-ai-app-1|0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp"
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV, tunnel_log=CF_LOG, extra_env={"FAKE_PS": LEDGER, "PROCUREIQ_HOST_PORT": "8000"})
+check("port held by ANOTHER project's container: refused before starting anything, container named", code != 0 and "ledger-finance-ai-app-1" in out and not ups(calls))
+check("...with the easy fix (PROCUREIQ_HOST_PORT=8010) and the stop command", "PROCUREIQ_HOST_PORT=8010" in out and "docker stop ledger-finance-ai-app-1" in out)
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV, tunnel_log=CF_LOG, extra_env={"FAKE_PS": "other-app|0.0.0.0:3000->8000/tcp", "PROCUREIQ_HOST_PORT": "8000"})
+check("a container that merely uses 8000 INSIDE (mapped to host 3000) is not a conflict", code == 0 and len(ups(calls)) == 1)
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV, tunnel_log=CF_LOG, extra_env={"FAKE_PS": "procureiq_api|127.0.0.1:8000->8000/tcp", "PROCUREIQ_HOST_PORT": "8000"})
+check("our own running API container is not a conflict (re-running the script is fine)", code == 0 and len(ups(calls)) == 1)
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV + f"PROCUREIQ_HOST_PORT={server.server_port}\n", tunnel_log=CF_LOG)
+check("port held by a program on the PC (not Docker): refused, with the netstat command", code != 0 and "not Docker" in out and f"findstr :{server.server_port}" in out and not ups(calls))
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV + f"PROCUREIQ_HOST_PORT={FREE_PORT}\n", tunnel_log=CF_LOG)
+check("a free custom port from .env is accepted", code == 0 and len(ups(calls)) == 1)
+code, out, calls, _, _ = run("-NoVerify", env_text=GOODENV + "PROCUREIQ_HOST_PORT=abc\n", tunnel_log=CF_LOG)
+check("a non-numeric PROCUREIQ_HOST_PORT is rejected", code != 0 and "port number" in out and not ups(calls))
 
 # ---- ngrok
 KEYED = f"PROCUREIQ_API_KEY={'cd' * 24}\n"

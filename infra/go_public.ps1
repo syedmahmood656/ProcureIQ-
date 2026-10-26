@@ -111,6 +111,23 @@ function Get-TunnelUrl([string]$Container, [int]$TimeoutS) {
     return ""
 }
 
+# True when ANY program on this PC is listening on the TCP port (works on Windows and Linux, IPv4 and IPv6).
+function Test-PortListening([int]$Port) {
+    $l = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $Port }
+    return [bool]$l
+}
+
+# Names of RUNNING containers that publish the given HOST port. (`docker ps --filter publish=N` matches the
+# container-side port, which would flag e.g. a container mapped 3000->8000, so the real mappings are read.)
+function Get-PortHolders([string]$Port) {
+    $holders = @()
+    foreach ($line in ((Invoke-Docker @("ps", "--format", "{{.Names}}|{{.Ports}}")).Out -split "`n")) {
+        $parts = $line.Trim().Split("|", 2)
+        if ($parts.Count -eq 2 -and $parts[1] -match ":$Port->") { $holders += $parts[0] }
+    }
+    return $holders
+}
+
 # Plain-language hint when docker reports a busy port (an old container, or a local uvicorn started by hand).
 function Get-PortHint([string]$Out) {
     if ($Out -match "port is already allocated|address already in use|Only one usage of each socket") {
@@ -199,6 +216,28 @@ if ($Provider -eq "ngrok") {
     $profiles = @("app", "public-ngrok"); $service = "ngrok"; $otherService = "tunnel"; $logContainer = "procureiq_ngrok"
 } else {
     $profiles = @("app", "public"); $service = "tunnel"; $otherService = "ngrok"; $logContainer = "procureiq_tunnel"
+}
+
+# ---- 2b. is the host port free? Otherwise the API container cannot start and the tunnel shows HTTP 502 ---
+$hostPort = Read-EnvValue "PROCUREIQ_HOST_PORT"
+if (-not $hostPort) { $hostPort = "8000" }
+if ($hostPort -notmatch '^\d{2,5}$' -or [int]$hostPort -gt 65535) { throw "PROCUREIQ_HOST_PORT must be a port number such as 8010 (got '$hostPort')." }
+$holders = @(Get-PortHolders $hostPort)
+$foreign = @($holders | Where-Object { $_ -ne "procureiq_api" })
+$portHelp = "`
+Easiest fix, without touching the other program: add this line to your .env and run again:`
+  PROCUREIQ_HOST_PORT=8010"
+if ($foreign.Count -gt 0) {
+    throw ("Port $hostPort on this PC is already used by another Docker container: $($foreign -join ', ').`
+" +
+           "ProcureIQ's API cannot start while that is true (and a tunnel in front of it would show HTTP 502).$portHelp`
+" +
+           "Or stop that container:  docker stop $($foreign[0])")
+}
+if (($holders -notcontains "procureiq_api") -and (Test-PortListening ([int]$hostPort))) {
+    throw ("Port $hostPort on this PC is already used by a program that is not Docker (for example a 'uvicorn' started by hand).`
+" +
+           "Find it with:  netstat -ano | findstr :$hostPort$portHelp")
 }
 
 # ---- 3. start ---------------------------------------------------------------------------------

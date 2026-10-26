@@ -82,7 +82,7 @@ services:
     container_name: procureiq_api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${PROCUREIQ_HOST_PORT:-8000}:8000"   # host port is configurable: set PROCUREIQ_HOST_PORT in .env if 8000 is taken
     environment:
       # wiring between containers (fixed)
       - POSTGRES_HOST=postgres
