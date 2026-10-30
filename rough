@@ -154,3 +154,68 @@ Things to try:
   - or use a permanent address instead: .\infra\go_public.ps1 -Provider ngrok
  
 (venv) PS C:\Projects\Procure-IQ> 
+
+
+################
+
+
+
+(venv) PS C:\Projects\Procure-IQ> python scripts/check_env.py
+.env: problems found
+  - line 42: QDRANT_API_KEY  has a comment right after an empty value (it would be read as the value)
+  - line 43: PGSSLMODE  has a comment right after an empty value (it would be read as the value)
+  fix it with:  python scripts/check_env.py --fix        (a backup is saved first)
+ok: .env.example has no problems
+(venv) PS C:\Projects\Procure-IQ> python scripts/check_env.py --fix
+.env: problems found
+  - line 42: QDRANT_API_KEY  has a comment right after an empty value (it would be read as the value)
+  - line 43: PGSSLMODE  has a comment right after an empty value (it would be read as the value)
+  repaired. Backup of the original: .env.bak-20261030-235455  (it may contain secrets: delete it when you no longer need it)
+ok: .env.example has no problems
+(venv) PS C:\Projects\Procure-IQ> python scripts/check_env.py
+ok: .env has no problems
+ok: .env.example has no problems
+(venv) PS C:\Projects\Procure-IQ> python eval/run_agent_eval.py --provider openrouter --types multi_hop --limit 1
+C:\Projects\Procure-IQ\venv\Lib\site-packages\langgraph\cache\base\__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core')to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+Scoring the AGENT on 1 gold question(s) (types=multi_hop, provider=openrouter)...
+  [1/1] mh_liability_spend: Which vendors with total purchase-order spend above $1,537,622 have contracts that include
+
+=== MULTI-HOP, PER QUESTION ===
+id                          route tool P/R/F1       answer P/R/F1     mention  retry verdict
+mh_liability_spend          both  1.00/1.00/1.00    1.00/1.00/1.00    1.00     0     accept
+
+=== AGENT SUMMARY ===
+{
+  "items_total": 1,
+  "items_errored": 0,
+  "route_accuracy_overall": 1,
+  "route_accuracy_single_hop": null,
+  "route_accuracy_multi_hop": 1,
+  "avg_retries": 0,
+  "verdicts": {
+    "accept": 1
+  },
+  "sql_error_items": 0,
+  "avg_latency_s": 54.78,
+  "multi_hop_count": 1,
+  "multi_hop_tool_precision": 1.0,
+  "multi_hop_tool_recall": 1.0,
+  "multi_hop_tool_f1": 1.0,
+  "multi_hop_tool_exact_match_rate": 1,
+  "multi_hop_answer_precision": 1.0,
+  "multi_hop_answer_recall": 1.0,
+  "multi_hop_answer_f1": 1.0,
+  "multi_hop_avg_vendor_mention_recall": 1.0,
+  "single_hop_count": 0,
+  "single_hop_chunk_hit_rate": null,
+  "single_hop_hit_rate_by_category": {}
+}
+
+=== BASELINE (Phase 4) vs AGENT (Phase 6) ===
+metric                                      baseline     agent
+multi-hop vendor mention recall                0.000     1.000
+(baseline cannot be scored on precision/F1/routing -- it only produces one answer text)
+
+Wrote C:\Projects\Procure-IQ\data\eval\results_agent\per_item_results.jsonl and C:\Projects\Procure-IQ\data\eval\results_agent\summary.json
+(venv) PS C:\Projects\Procure-IQ> 

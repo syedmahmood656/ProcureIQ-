@@ -208,7 +208,7 @@ eval/             build_gold_questions, run_baseline_eval, run_agent_eval, metri
                   check_regression.py (quality gate) and offline tests
 infra/            Dockerfile, docker-compose.yml, smoke_test.ps1, go_public.ps1,
                   deploy_gcp.ps1, migrate_data.ps1, render_service.py, cloudbuild.yaml, tests
-scripts/          extract_cuad_contracts.py, check_no_secrets.py (+ test)
+scripts/          extract_cuad_contracts.py, check_no_secrets.py, check_env.py (.env linter/repair), + tests
 .github/workflows/  ci.yml, keepalive.yml (cloud path only)
 requirements.txt (dev) | requirements-api.txt (image) | requirements-ci.txt (CI)
 .env.example  .gitignore  .dockerignore  .gcloudignore
@@ -474,6 +474,7 @@ failure. CI discovers every `*offline*.py`.
 | `eval/test_agent_eval_offline.py`, `eval/test_offline.py` | 22, n/a | scoring logic |
 | `eval/test_regression_gate_offline.py` | 24 | quality gate, incl. metric-name drift guard |
 | `scripts/test_check_no_secrets_offline.py` | 23 | scanner |
+| `scripts/test_check_env_offline.py` | 30 | `.env` linter and repair, against the real python-dotenv parser |
 | `infra/test_infra_offline.py` | 73 | compose/Dockerfile/CI drift, `.gitignore` via real `git check-ignore` |
 | `infra/test_cloudrun_offline.py` | 96 | Cloud Run definition, deploy/migrate scripts |
 | `infra/test_public_offline.py` | 102 | tunnel services; runs the real script against a fake docker (Linux/macOS with pwsh) |
@@ -546,6 +547,7 @@ powershell -ExecutionPolicy Bypass -File .\infra\go_public.ps1                  
 | API unhealthy after `up` | `docker compose ... logs api`; the models take 1 to 3 minutes to load on first start |
 | `give_up` with garbage SQL | free-tier LLM returned a non-SQL reply; the retry loop handles most cases, re-ask |
 | Import error `No module named agent` | an editor auto-added `from agent import state`; delete it |
+| `invalid sslmode value: "# ..."`, or other settings that look like comment text | `.env` has `KEY=   # comment` (an empty value followed by a comment); python-dotenv and Docker Compose both read the comment as the value. Run `python scripts/check_env.py` to list them and `--fix` to repair (backup saved first). Keep comments on their own line |
 | Port 8000 busy (`port is already allocated`; a tunnel then answers HTTP 502 because the API never started) | `go_public.ps1` now checks first and names the culprit (another project's container, or a program such as a hand-started `uvicorn`); set `PROCUREIQ_HOST_PORT=8010` in `.env` to move ProcureIQ instead of stopping the other program |
 
 ---
@@ -669,6 +671,10 @@ Bugs and surprises that tests or checks caught (useful interview material):
 - `$PSScriptRoot` is empty inside a `param()` block on Windows PowerShell 5.1 (PowerShell 7 fills it in), so
   `go_public.ps1` crashed on first run on the real machine; fixed, and every script's `param()` block is now
   checked by a test (13c);
+- the first full agent evaluation failed every SQL attempt with `invalid sslmode value: "# ..."`: a comment in
+  `.env.example` (`PGSSLMODE=   # note`) was read as the VALUE by python-dotenv and by Docker Compose; the SQL the
+  model wrote was fine. Five lines of the template had the pattern. Fixed the template (comments on their own
+  line), added `scripts/check_env.py` (find/repair, never prints values) and tests against the real parser (13c);
 - a stale quick-tunnel address from an earlier run was picked out of the old container's logs and never
   answered; the script now diagnoses it and restarts the tunnel (13c);
 - another project's container had held port 8000 for 21 hours; the API container could not start, a tunnel in
